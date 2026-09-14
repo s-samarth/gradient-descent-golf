@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gradient Descent Golf — local preview</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #222; }
+    #phone { position: relative; width: min(390px, 100vw); height: min(844px, 100vh); margin: 0 auto; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div id="phone"></div>
+  <script src="mock-ctx.js"></script>
+  <script src="../dist/main.js"></script>
+  <script>
+    fetch("../dist/plethora.json").then(r => r.json()).then(manifest => {
+      const ctx = createMockCtx(document.getElementById("phone"), manifest);
+      window.__ctx = ctx;
+      window.plethoraBit.init(ctx).catch(err => { window.__initError = String(err); console.error(err); });
+    });
+  </script>
+</body>
+</html>
