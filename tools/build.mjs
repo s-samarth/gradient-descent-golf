@@ -3,6 +3,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 
 const ORDER = [
+  "runtime.js", "services.js", "diagnostics.js",
   "levels.js", "landscape.js", "descent.js", "view.js",
   "render-scene.js", "render-hud.js", "render-frame.js",
   "course.js", "feedback.js", "game.js", "main.js"

@@ -1,39 +1,30 @@
 // Sound, haptics, and visual pops. Everything here is best-effort: a missing
 // capability or a locked audio context should never break gameplay.
 
-function createFeedback(ctx) {
+function createFeedback(services) {
   let music = null;
-
-  function safe(fn) {
-    try {
-      const result = fn();
-      if (result && typeof result.catch === "function") result.catch(() => {});
-    } catch (err) {
-      // Feedback is optional; ignore host capability errors.
-    }
-  }
+  let musicStarting = false;
 
   function haptic(kind) {
-    if (ctx.capabilities && ctx.capabilities.haptics) safe(() => ctx.platform.haptic(kind));
-  }
-
-  function sting(name) {
-    if (music) safe(() => ctx.music.sting(name));
+    if (services.capability("haptics")) services.platform("haptic", kind);
   }
 
   async function unlockMusic() {
-    if (music || !(ctx.capabilities && ctx.capabilities.backgroundMusic)) return;
-    try {
-      await ctx.music.unlock();
-      music = ctx.music.play({ preset: "lofi", volume: ctx.tune.percent("music_volume") ?? 0.3, fadeInMs: 1200 });
-    } catch (err) {
-      music = null;
-    }
+    if (music || musicStarting) return;
+    musicStarting = true;
+    music = await services.music.start(services.tune("music_volume"));
+    musicStarting = false;
   }
 
-  ctx.tune.onChange("music_volume", () => {
-    if (music) safe(() => music.setVolume(ctx.tune.percent("music_volume")));
+  services.onTuneChange("music_volume", () => {
+    if (music && typeof music.setVolume === "function") {
+      safeCall(() => music.setVolume(services.tune("music_volume")));
+    }
   });
+
+  function sting(name) {
+    if (music) services.music.sting(name);
+  }
 
   return {
     unlockMusic,
@@ -43,19 +34,19 @@ function createFeedback(ctx) {
     sunk(pos, label) {
       haptic("success");
       sting("coin");
-      safe(() => ctx.fx.burst({ x: pos.x, y: pos.y, color: THEME.accent, count: 18 }));
-      safe(() => ctx.fx.floatText({ text: label, x: pos.x, y: pos.y - 40, color: THEME.accent, size: 22 }));
+      services.fx("burst", { x: pos.x, y: pos.y, color: THEME.accent, count: 18 });
+      services.fx("floatText", { text: label, x: pos.x, y: pos.y - 40, color: THEME.accent, size: 22 });
     },
     exploded(pos) {
       haptic("error");
       sting("fail");
-      safe(() => ctx.fx.flash({ color: THEME.danger, opacity: 0.22 }));
-      safe(() => ctx.fx.floatText({ text: "∇ exploded", x: pos.x, y: pos.y, color: THEME.danger }));
+      services.fx("flash", { color: THEME.danger, opacity: 0.22 });
+      services.fx("floatText", { text: "∇ exploded", x: pos.x, y: pos.y, color: THEME.danger });
     },
     stuck(pos, text) {
       haptic("warning");
-      safe(() => ctx.fx.ripple({ x: pos.x, y: pos.y, color: THEME.muted }));
-      safe(() => ctx.fx.floatText({ text, x: pos.x, y: pos.y - 24, color: THEME.ink, size: 15 }));
+      services.fx("ripple", { x: pos.x, y: pos.y, color: THEME.muted });
+      services.fx("floatText", { text, x: pos.x, y: pos.y - 24, color: THEME.ink, size: 15 });
     },
     courseDone() {
       haptic("success");

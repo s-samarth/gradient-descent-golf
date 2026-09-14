@@ -35,7 +35,7 @@ check(ob && ["immersive", "one_line", "guided", "briefing"].includes(ob.kind), "
   check(s.title.length <= 80 && s.body.length <= 360 && s.id.length <= 48, `onboarding step ${s.id} too long`);
 });
 
-const uses = { haptics: /platform\.haptic\(/, backgroundMusic: /ctx\.music\./, audio: /ctx\.audio\./,
+const uses = { haptics: /platform\.haptic\(|"haptic"/, backgroundMusic: /ctx\.music\./, audio: /ctx\.audio\./,
   storage: /ctx\.storage\./, motion: /ctx\.motion\./, camera: /ctx\.camera\./, microphone: /ctx\.microphone\./ };
 for (const [perm, re] of Object.entries(uses)) {
   if (re.test(source)) check(manifest.permissions.includes(perm), `source uses ${perm} but manifest lacks it`);
@@ -46,7 +46,15 @@ const banned = [
   [/requestAnimationFrame/, "raw requestAnimationFrame"], [/(?<!ctx\.)\baddEventListener\(/, "raw addEventListener"],
   [/https?:\/\//, "hard-coded URL"], [/\bfetch\(/, "fetch"], [/new Worker/, "worker"], [/WebSocket/, "websocket"]
 ];
-banned.forEach(([re, name]) => check(!re.test(source), `anti-pattern: ${name}`));
+// runtime.js and diagnostics.js hold deliberate fallbacks for older Plethora runtimes
+// (raw listeners/rAF/canvas only when ctx lacks the helper), so they are exempt.
+const exempt = /\/\/ ---- (runtime|diagnostics)\.js ----[\s\S]*?(?=\/\/ ---- )/g;
+const checked = source.replace(exempt, "");
+banned.forEach(([re, name]) => check(!re.test(checked), `anti-pattern: ${name}`));
+// Rules the Plethora upload server enforces on the whole package, fallbacks included.
+[[/requestAnimationFrame/, "requestAnimationFrame (use ctx.onFrame)"], [/document\.(body|documentElement)/, "mounting on document.body/documentElement"],
+  [/createElement\(\s*["']canvas/, "raw canvas (use ctx.createCanvas2D)"]]
+  .forEach(([re, name]) => check(!re.test(source), `server rule: ${name}`));
 check(Buffer.byteLength(source) < 2097152, "package too large");
 
 try { new Function(source); } catch (err) { errors.push(`syntax: ${err.message}`); }

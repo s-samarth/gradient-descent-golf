@@ -1,6 +1,7 @@
 // Minimal stand-in for the Plethora runtime `ctx`, covering only what this Bit uses.
 // For local browser testing only; never shipped.
 
+window.__clock = 0;
 window.createMockCtx = function createMockCtx(container, manifest) {
   const events = (window.__events = []);
   const log = (name, payload) => events.push({ name, payload, t: Math.round(performance.now()) });
@@ -69,15 +70,15 @@ window.createMockCtx = function createMockCtx(container, manifest) {
       loop({ input, update, render }) {
         // Test hook: advance the loop deterministically when rAF is throttled.
         window.__step = (n = 1, dt = 16) => {
-          for (let i = 0; i < n; i++) { update(dt); render(); input.frameDone(); }
+          for (let i = 0; i < n; i++) { __clock += dt; update(dt); if (render) render(); if (input) input.frameDone(); }
         };
         let last = performance.now();
         const frame = now => {
           const dt = Math.min(50, now - last);
           last = now;
           update(dt);
-          render();
-          input.frameDone();
+          if (render) render();
+          if (input) input.frameDone();
           requestAnimationFrame(frame);
         };
         requestAnimationFrame(frame);
@@ -121,5 +122,12 @@ window.createMockCtx = function createMockCtx(container, manifest) {
     pulse: { complete: o => log("pulse.complete", o) },
     timeout: (fn, ms) => setTimeout(fn, ms)
   };
+
+  // ?legacy=1 imitates the older runtime seen on-device: no ctx.input, game, tune, fx, music.
+  if (new URLSearchParams(location.search).has("legacy")) {
+    const loop = ctx.game.loop;
+    for (const key of ["input", "game", "tune", "fx", "music", "pulse", "markVisualReady", "timeout"]) delete ctx[key];
+    ctx.onFrame = cb => loop({ update: cb });
+  }
   return ctx;
 };

@@ -9,8 +9,8 @@ const OUTCOME_TEXT = {
   exploded: "Exploded! +1 penalty. Lower η."
 };
 
-function createGame(ctx, canvas, input, feedback) {
-  const course = createCourse(ctx);
+function createGame({ shell, services, canvas, input, feedback }) {
+  const course = createCourse(services);
   const state = course.state;
   const g = canvas.getContext("2d");
   let scene = "aim";
@@ -24,11 +24,11 @@ function createGame(ctx, canvas, input, feedback) {
   let clock = 0;
 
   const tune = {
-    etaMin: () => ctx.tune.number("eta_min") ?? 0.0005,
-    etaMax: () => ctx.tune.number("eta_max") ?? 0.6,
-    maxSteps: () => ctx.tune.integer("max_steps") ?? 30,
-    hopMs: () => ctx.tune.durationMs("hop_ms") ?? 110,
-    accent: () => ctx.tune.color("accent_color") || THEME.accent
+    etaMin: () => Number(services.tune("eta_min")),
+    etaMax: () => Number(services.tune("eta_max")),
+    maxSteps: () => Math.round(Number(services.tune("max_steps"))),
+    hopMs: () => Number(services.tune("hop_ms")),
+    accent: () => services.tune("accent_color") || THEME.accent
   };
 
   function setScene(next) { scene = next; sceneAt = clock; }
@@ -37,20 +37,20 @@ function createGame(ctx, canvas, input, feedback) {
   function begin() {
     if (started) return;
     started = true;
-    ctx.platform.start();
+    services.platform("start");
     feedback.unlockMusic();
   }
 
   function onAimInput(view) {
     if (input.pressed) {
       begin();
-      if (ctx.input.hitRect(input, view.resetButton.x, view.resetButton.y, view.resetButton.w, view.resetButton.h)) {
+      if (hitRect(input, view.resetButton)) {
         if (state.ballX !== LEVELS[state.hole].start) {
           course.addStroke(1);
           state.ballX = LEVELS[state.hole].start;
           lastPath = null;
           say("Back to the tee. +1 stroke.");
-          ctx.platform.interact({ type: "reset_hole" });
+          services.platform("interact", { type: "reset_hole" });
         }
         return;
       }
@@ -71,7 +71,7 @@ function createGame(ctx, canvas, input, feedback) {
     course.addStroke(1);
     status = null;
     feedback.shoot();
-    ctx.platform.interact({ type: "stroke", eta, hole: state.hole + 1 });
+    services.platform("interact", { type: "stroke", eta, hole: state.hole + 1 });
     setScene("rolling");
   }
 
@@ -82,7 +82,7 @@ function createGame(ctx, canvas, input, feedback) {
       state.ballX = state.land.xMin;
       const strokes = state.strokes[state.hole];
       feedback.sunk(view.ballScreen(state.ballX), scoreName(strokes, LEVELS[state.hole].par));
-      ctx.platform.milestone("hole_complete", { hole: state.hole + 1, strokes });
+      services.platform("milestone", "hole_complete", { hole: state.hole + 1, strokes });
       setScene("holeDone");
       return;
     }
@@ -129,21 +129,21 @@ function createGame(ctx, canvas, input, feedback) {
           summary = result;
           setScene("courseDone");
           feedback.courseDone();
-          ctx.timeout(() => ctx.pulse.complete({ score: result.strokes, text: `${result.strokes} strokes · par ${result.par}` }), 250);
+          shell.timeout(() => services.pulseComplete({ score: result.strokes, text: `${result.strokes} strokes · par ${result.par}` }), 250);
         });
       }
     } else if (scene === "courseDone") {
       summary = null;
       lastPath = null;
       course.restartCourse();
-      ctx.platform.interact({ type: "replay" });
+      services.platform("interact", { type: "replay" });
       setScene("aim");
     }
   }
 
   function update(dt) {
     clock += dt;
-    const view = makeView(ctx, state.land);
+    const view = makeView(shell, state.land);
     if (scene === "aim") onAimInput(view);
     else if (scene === "rolling") onRolling(dt, view);
     else onPanelTap();
@@ -151,7 +151,8 @@ function createGame(ctx, canvas, input, feedback) {
   }
 
   function render() {
-    const view = makeView(ctx, state.land);
+    shell.prepareCanvas(canvas, g);
+    const view = makeView(shell, state.land);
     const accent = tune.accent();
     renderFrame(g, view, { state, scene, aim, shot, lastPath, status, summary, clock, accent, tune });
   }

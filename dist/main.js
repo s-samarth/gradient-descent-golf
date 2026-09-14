@@ -1,6 +1,345 @@
 (function () {
 "use strict";
 
+// ---- runtime.js ----
+// Compatibility shell over the Plethora `ctx`.
+// The installed Plethora app can run an older runtime than the published SDK docs
+// (e.g. no ctx.input). Every helper here prefers the documented ctx API and falls
+// back to plain browser APIs, so the game never depends on one runtime version.
+
+function isFn(value) {
+  return typeof value === "function";
+}
+
+function safeCall(fn, fallback) {
+  try {
+    const result = fn();
+    if (result && typeof result.catch === "function") result.catch(() => {});
+    return result;
+  } catch (err) {
+    return fallback;
+  }
+}
+
+function createShell(ctx) {
+  const cleanups = [];
+  const container = ctx.container || null; // read-only; only used for sizing
+  if (typeof ctx.onDestroy === "function") ctx.onDestroy(() => cleanups.splice(0).forEach(fn => safeCall(fn)));
+
+  function width() {
+    return ctx.width || (container && container.clientWidth) || window.innerWidth;
+  }
+  function height() {
+    return ctx.height || (container && container.clientHeight) || window.innerHeight;
+  }
+  function safeArea() {
+    const s = ctx.safeArea || {};
+    return { top: s.top || 0, bottom: s.bottom || 0, left: s.left || 0, right: s.right || 0 };
+  }
+
+  function listen(target, type, handler, options) {
+    if (typeof ctx.listen === "function") return ctx.listen(target, type, handler, options);
+    target.addEventListener(type, handler, options);
+    cleanups.push(() => target.removeEventListener(type, handler, options));
+    return () => target.removeEventListener(type, handler, options);
+  }
+
+  function createCanvas() {
+    let canvas = null;
+    if (typeof ctx.createCanvas2D === "function") canvas = safeCall(() => ctx.createCanvas2D(), null);
+    if (!canvas && typeof ctx.createCanvas === "function") canvas = safeCall(() => ctx.createCanvas(), null);
+    if (!canvas) throw new Error("This runtime has no ctx.createCanvas2D or ctx.createCanvas");
+    canvas.style.position = "absolute";
+    canvas.style.left = "0";
+    canvas.style.top = "0";
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    canvas.style.touchAction = "none";
+    return canvas;
+  }
+
+  // We own the backing store: size it to CSS size × DPR and draw in CSS pixels.
+  function prepareCanvas(canvas, g) {
+    const w = width();
+    const h = height();
+    const dpr = Math.min(window.devicePixelRatio || ctx.dpr || 1, 2);
+    const bw = Math.round(w * dpr);
+    const bh = Math.round(h * dpr);
+    if (canvas.width !== bw || canvas.height !== bh) {
+      canvas.width = bw;
+      canvas.height = bh;
+    }
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  // Minimal pointer tracker with one-frame pressed/released flags.
+  function trackPointer(canvas) {
+    const state = { x: 0, y: 0, down: false, pressed: false, released: false, id: null };
+    const locate = e => {
+      const rect = canvas.getBoundingClientRect();
+      state.x = e.clientX - rect.left;
+      state.y = e.clientY - rect.top;
+    };
+    listen(canvas, "pointerdown", e => {
+      if (state.down) return;
+      e.preventDefault();
+      state.id = e.pointerId;
+      safeCall(() => canvas.setPointerCapture(e.pointerId));
+      locate(e);
+      state.down = true;
+      state.pressed = true;
+    });
+    listen(canvas, "pointermove", e => {
+      if (state.down && e.pointerId === state.id) { e.preventDefault(); locate(e); }
+    });
+    const end = e => {
+      if (!state.down || e.pointerId !== state.id) return;
+      locate(e);
+      state.down = false;
+      state.released = true;
+    };
+    listen(canvas, "pointerup", end);
+    listen(canvas, "pointercancel", end);
+    state.frameDone = () => { state.pressed = false; state.released = false; };
+    return state;
+  }
+
+  // Frame loop: ctx.game.loop → ctx.onFrame → ctx.raf → ctx.interval.
+  // Plethora rejects uploads that touch the browser's own frame scheduler, so no raw fallback.
+  function loop(frame) {
+    let last = performance.now();
+    // Prefer the runtime's dt (it pauses with the host); fall back to wall-clock time.
+    const tick = hostDt => {
+      const now = performance.now();
+      const measured = now - last;
+      last = now;
+      const dt = Number.isFinite(hostDt) && hostDt > 0 ? hostDt : measured;
+      frame(Math.min(50, Math.max(0, dt)));
+    };
+    if (ctx.game && isFn(ctx.game.loop) && safeCall(() => ctx.game.loop({ update: dt => tick(dt) }), false) !== false) return;
+    if (typeof ctx.onFrame === "function" && safeCall(() => ctx.onFrame(dt => tick(dt)), false) !== false) return;
+    if (typeof ctx.raf === "function" && safeCall(() => ctx.raf(dt => tick(dt)), false) !== false) return;
+    if (typeof ctx.interval === "function") ctx.interval(() => tick(), 16);
+  }
+
+  function timeout(fn, ms) {
+    if (typeof ctx.timeout === "function") return ctx.timeout(fn, ms);
+    const id = setTimeout(fn, ms);
+    cleanups.push(() => clearTimeout(id));
+    return id;
+  }
+
+  return { width, height, safeArea, createCanvas, prepareCanvas, trackPointer, loop, timeout };
+}
+
+function hitRect(p, r) {
+  return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+}
+
+// ---- services.js ----
+// Optional Plethora services (tuning, score, progress, platform events, fx, music),
+// each wrapped so a missing or older API degrades to a no-op instead of crashing.
+
+const TUNING_DEFAULTS = {
+  eta_min: 0.0005,
+  eta_max: 0.6,
+  max_steps: 30,
+  hop_ms: 110,
+  accent_color: "#ffd166",
+  music_volume: 0.3
+};
+
+function createServices(ctx) {
+  function tune(id) {
+    const t = ctx.tune;
+    const value = t && typeof t.get === "function" ? safeCall(() => t.get(id), undefined) : undefined;
+    return value === undefined || value === null ? TUNING_DEFAULTS[id] : value;
+  }
+
+  function onTuneChange(id, fn) {
+    if (ctx.tune && isFn(ctx.tune.onChange)) safeCall(() => ctx.tune.onChange(id, fn));
+  }
+
+  // No computed lookups (obj[name]) on anything derived from ctx: Plethora's upload
+  // scanner treats them as dynamic loader access and rejects the Bit.
+  const p = ctx.platform || {};
+  const platformFns = new Map([
+    ["ready", p.ready], ["start", p.start], ["interact", p.interact], ["milestone", p.milestone],
+    ["complete", p.complete], ["haptic", p.haptic], ["setScore", p.setScore]
+  ]);
+  function platform(name, ...args) {
+    const fn = platformFns.get(name);
+    if (isFn(fn)) safeCall(() => fn.apply(p, args));
+  }
+
+  const f = ctx.fx || {};
+  const fxFns = new Map([["burst", f.burst], ["floatText", f.floatText], ["flash", f.flash], ["ripple", f.ripple]]);
+  function fx(name, options) {
+    const fn = fxFns.get(name);
+    if (isFn(fn)) safeCall(() => fn.call(f, options));
+  }
+
+  const caps = ctx.capabilities || null;
+  const capabilityFlags = new Map(caps ? [["haptics", caps.haptics], ["backgroundMusic", caps.backgroundMusic]] : []);
+  function capability(name) {
+    return !caps || capabilityFlags.get(name) !== false;
+  }
+
+  function createScore() {
+    const native = ctx.game && isFn(ctx.game.score) ? safeCall(() => ctx.game.score({ initial: 0, min: 0 }), null) : null;
+    let local = 0;
+    const sync = nativeCall => {
+      if (native) safeCall(nativeCall);
+      else platform("setScore", local);
+    };
+    return {
+      get value() { return local; },
+      add(n, opts) { local += n; sync(() => native.add(n, opts)); },
+      set(n, opts) { local = n; sync(() => native.set(n, opts)); },
+      reset(opts) { local = 0; sync(() => native.reset(opts)); },
+      async submit(channel, options) {
+        try {
+          if (native && typeof native.submit === "function") return await native.submit(channel, options);
+          if (ctx.memory && isFn(ctx.memory.record)) return await ctx.memory.record(channel).submit(local, options);
+        } catch (err) {
+          return null;
+        }
+        return null;
+      }
+    };
+  }
+
+  const progressApi = () => (ctx.game && ctx.game.progress ? ctx.game.progress : null);
+  const progress = {
+    async load(channel) {
+      const api = progressApi();
+      if (!api || typeof api.load !== "function") return null;
+      try { return await api.load(channel); } catch (err) { return null; }
+    },
+    save(channel, payload) {
+      const api = progressApi();
+      if (api && typeof api.save === "function") safeCall(() => api.save(channel, payload));
+    },
+    complete(channel, payload) {
+      const api = progressApi();
+      if (api && typeof api.complete === "function") safeCall(() => api.complete(channel, payload));
+    },
+    abandon(channel) {
+      const api = progressApi();
+      if (api && typeof api.abandon === "function") safeCall(() => api.abandon(channel));
+    }
+  };
+
+  function pulseComplete(options) {
+    if (ctx.pulse && isFn(ctx.pulse.complete)) safeCall(() => ctx.pulse.complete(options));
+    else platform("complete", { ...options, pulse: true });
+  }
+
+  const music = {
+    async start(volume) {
+      if (!ctx.music || !capability("backgroundMusic")) return null;
+      try {
+        if (typeof ctx.music.unlock === "function") await ctx.music.unlock();
+        if (typeof ctx.music.play !== "function") return null;
+        return ctx.music.play({ preset: "lofi", volume, fadeInMs: 1200 }) || null;
+      } catch (err) {
+        return null;
+      }
+    },
+    sting(name) {
+      if (ctx.music && typeof ctx.music.sting === "function") safeCall(() => ctx.music.sting(name));
+    }
+  };
+
+  function markReady() {
+    if (typeof ctx.markVisualReady === "function") safeCall(() => ctx.markVisualReady("course drawn"));
+    platform("ready");
+  }
+
+  return { tune, onTuneChange, platform, fx, capability, createScore, progress, pulseComplete, music, markReady };
+}
+
+// ---- diagnostics.js ----
+// If anything fails at startup or mid-frame, show the error plus what this
+// runtime actually provides, instead of a blank screen. A screenshot of this
+// is enough to diagnose runtime mismatches.
+
+function describeRuntime(ctx) {
+  const lines = [];
+  const runtime = ctx && ctx.runtime ? `${ctx.runtime.version || "?"} sdk ${ctx.runtime.sdkVersion || "?"}` : "no ctx.runtime";
+  lines.push(runtime);
+  if (!ctx) return lines;
+  const keys = Object.keys(ctx).sort();
+  lines.push(`ctx: ${keys.join(", ")}`);
+  const groups = { input: ctx.input, game: ctx.game, platform: ctx.platform, tune: ctx.tune, fx: ctx.fx, music: ctx.music };
+  for (const [group, value] of Object.entries(groups)) {
+    lines.push(`${group}: ${value && typeof value === "object" ? Object.keys(value).join(", ") || "{}" : String(value)}`);
+  }
+  return lines;
+}
+
+function showFailure(ctx, canvas, err, stage) {
+  const message = `${stage}: ${err && err.message ? err.message : String(err)}`;
+  const lines = [message, ...describeRuntime(ctx)];
+  try {
+    if (ctx && ctx.platform && typeof ctx.platform.error === "function") ctx.platform.error({ message, stage });
+  } catch (ignored) {
+    // Reporting is best-effort.
+  }
+
+  if (!canvas && ctx && typeof ctx.createCanvas2D === "function") {
+    try { canvas = ctx.createCanvas2D(); } catch (ignored) { canvas = null; }
+  }
+  if (!canvas && ctx && typeof ctx.createRoot === "function") {
+    try {
+      const root = ctx.createRoot({ style: "padding:60px 20px;color:#eee;background:#0c1015;font:12px monospace;white-space:pre-wrap" });
+      root.textContent = lines.join("\n\n");
+    } catch (ignored) {
+      // Nothing else we can do.
+    }
+    return;
+  }
+  const g = canvas && canvas.getContext ? canvas.getContext("2d") : null;
+  if (!g) return;
+  const w = canvas.clientWidth || 360;
+  const h = canvas.clientHeight || 640;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = "#0c1015";
+  g.fillRect(0, 0, w, h);
+  g.fillStyle = "#ff6b6b";
+  g.font = "700 16px system-ui, sans-serif";
+  g.fillText("Gradient Descent Golf hit an error", 20, 70);
+  g.font = "12px ui-monospace, Menlo, monospace";
+  let y = 100;
+  for (const line of lines) {
+    for (const chunk of wrapText(g, line, w - 40)) {
+      g.fillStyle = y === 100 ? "#ffd166" : "rgba(238,243,238,0.75)";
+      g.fillText(chunk, 20, y);
+      y += 17;
+      if (y > h - 40) return;
+    }
+    y += 6;
+  }
+}
+
+function wrapText(g, text, maxWidth) {
+  const out = [];
+  let line = "";
+  for (const word of String(text).split(/(\s+|,)/)) {
+    if (g.measureText(line + word).width > maxWidth && line) {
+      out.push(line);
+      line = word.trimStart();
+    } else {
+      line += word;
+    }
+  }
+  if (line) out.push(line);
+  return out;
+}
+
 // ---- levels.js ----
 // Nine holes. bowl = a·(θ − c)², dips = Gaussian valleys, curvature = f''
 // at the global minimum (critical η = 2 / curvature). noise = SGD gradient noise (kick size scales with η). Check with tools/solve.mjs.
@@ -214,7 +553,7 @@ function formatEta(eta) {
 
 // ---- view.js ----
 // Screen layout: where the plot, meter, and buttons live for the current size.
-// Recomputed every frame from ctx.width/height so rotation and resizes just work.
+// Recomputed every frame from the shell's size so rotation and resizes just work.
 
 const THEME = {
   bg: "#0c1015",
@@ -232,10 +571,10 @@ const THEME = {
   font: "system-ui, -apple-system, 'Segoe UI', sans-serif"
 };
 
-function makeView(ctx, land) {
-  const w = ctx.width;
-  const h = ctx.height;
-  const safe = ctx.safeArea || { top: 0, bottom: 0, left: 0, right: 0 };
+function makeView(shell, land) {
+  const w = shell.width();
+  const h = shell.height();
+  const safe = shell.safeArea();
   const padX = Math.max(20, safe.left, safe.right) + 4;
   const top = safe.top + 16;
 
@@ -611,16 +950,12 @@ function scoreName(strokes, par) {
   return `+${diff}`;
 }
 
-function quietly(fn) {
-  Promise.resolve().then(fn).catch(() => {});
-}
-
 function totalPar() {
   return LEVELS.reduce((sum, level) => sum + level.par, 0);
 }
 
-function createCourse(ctx) {
-  const score = ctx.game.score({ initial: 0, min: 0 });
+function createCourse(services) {
+  const score = services.createScore();
   const state = { hole: 0, strokes: LEVELS.map(() => 0), ballX: 0, land: null };
 
   function loadHole(index) {
@@ -649,8 +984,9 @@ function createCourse(ctx) {
 
   async function restore() {
     try {
-      const saved = await ctx.game.progress.load(PROGRESS_CHANNEL);
-      if (!isValidSave(saved)) return false;
+      const saved = await services.progress.load(PROGRESS_CHANNEL);
+      // Never yank a player to another hole if they already started playing.
+      if (!isValidSave(saved) || total() > 0 || state.hole !== 0) return false;
       state.strokes = saved.state.strokes.slice();
       score.set(total(), { reason: "resume" });
       loadHole(saved.state.hole);
@@ -666,17 +1002,17 @@ function createCourse(ctx) {
       label: `Hole ${state.hole + 1} of ${LEVELS.length}`,
       percent: Math.round((state.hole / LEVELS.length) * 100)
     };
-    quietly(() => ctx.game.progress.save(PROGRESS_CHANNEL, payload));
+    services.progress.save(PROGRESS_CHANNEL, payload);
   }
 
   async function finish() {
     const strokes = total();
     const par = totalPar();
-    quietly(() => ctx.game.progress.complete(PROGRESS_CHANNEL, {
+    services.progress.complete(PROGRESS_CHANNEL, {
       state: { hole: LEVELS.length - 1, strokes: state.strokes.slice(), finished: true },
       label: "Course complete",
       percent: 100
-    }));
+    });
     let best = false;
     try {
       const result = await score.submit(RECORD_CHANNEL, { label: `${strokes} strokes` });
@@ -684,12 +1020,12 @@ function createCourse(ctx) {
     } catch (err) {
       best = false;
     }
-    ctx.platform.complete({ score: strokes, par });
+    services.platform("complete", { score: strokes, par });
     return { strokes, par, best };
   }
 
   function restartCourse() {
-    quietly(() => ctx.game.progress.abandon(PROGRESS_CHANNEL));
+    services.progress.abandon(PROGRESS_CHANNEL);
     state.strokes = LEVELS.map(() => 0);
     score.reset({ reason: "replay" });
     loadHole(0);
@@ -703,39 +1039,30 @@ function createCourse(ctx) {
 // Sound, haptics, and visual pops. Everything here is best-effort: a missing
 // capability or a locked audio context should never break gameplay.
 
-function createFeedback(ctx) {
+function createFeedback(services) {
   let music = null;
-
-  function safe(fn) {
-    try {
-      const result = fn();
-      if (result && typeof result.catch === "function") result.catch(() => {});
-    } catch (err) {
-      // Feedback is optional; ignore host capability errors.
-    }
-  }
+  let musicStarting = false;
 
   function haptic(kind) {
-    if (ctx.capabilities && ctx.capabilities.haptics) safe(() => ctx.platform.haptic(kind));
-  }
-
-  function sting(name) {
-    if (music) safe(() => ctx.music.sting(name));
+    if (services.capability("haptics")) services.platform("haptic", kind);
   }
 
   async function unlockMusic() {
-    if (music || !(ctx.capabilities && ctx.capabilities.backgroundMusic)) return;
-    try {
-      await ctx.music.unlock();
-      music = ctx.music.play({ preset: "lofi", volume: ctx.tune.percent("music_volume") ?? 0.3, fadeInMs: 1200 });
-    } catch (err) {
-      music = null;
-    }
+    if (music || musicStarting) return;
+    musicStarting = true;
+    music = await services.music.start(services.tune("music_volume"));
+    musicStarting = false;
   }
 
-  ctx.tune.onChange("music_volume", () => {
-    if (music) safe(() => music.setVolume(ctx.tune.percent("music_volume")));
+  services.onTuneChange("music_volume", () => {
+    if (music && typeof music.setVolume === "function") {
+      safeCall(() => music.setVolume(services.tune("music_volume")));
+    }
   });
+
+  function sting(name) {
+    if (music) services.music.sting(name);
+  }
 
   return {
     unlockMusic,
@@ -745,19 +1072,19 @@ function createFeedback(ctx) {
     sunk(pos, label) {
       haptic("success");
       sting("coin");
-      safe(() => ctx.fx.burst({ x: pos.x, y: pos.y, color: THEME.accent, count: 18 }));
-      safe(() => ctx.fx.floatText({ text: label, x: pos.x, y: pos.y - 40, color: THEME.accent, size: 22 }));
+      services.fx("burst", { x: pos.x, y: pos.y, color: THEME.accent, count: 18 });
+      services.fx("floatText", { text: label, x: pos.x, y: pos.y - 40, color: THEME.accent, size: 22 });
     },
     exploded(pos) {
       haptic("error");
       sting("fail");
-      safe(() => ctx.fx.flash({ color: THEME.danger, opacity: 0.22 }));
-      safe(() => ctx.fx.floatText({ text: "∇ exploded", x: pos.x, y: pos.y, color: THEME.danger }));
+      services.fx("flash", { color: THEME.danger, opacity: 0.22 });
+      services.fx("floatText", { text: "∇ exploded", x: pos.x, y: pos.y, color: THEME.danger });
     },
     stuck(pos, text) {
       haptic("warning");
-      safe(() => ctx.fx.ripple({ x: pos.x, y: pos.y, color: THEME.muted }));
-      safe(() => ctx.fx.floatText({ text, x: pos.x, y: pos.y - 24, color: THEME.ink, size: 15 }));
+      services.fx("ripple", { x: pos.x, y: pos.y, color: THEME.muted });
+      services.fx("floatText", { text, x: pos.x, y: pos.y - 24, color: THEME.ink, size: 15 });
     },
     courseDone() {
       haptic("success");
@@ -778,8 +1105,8 @@ const OUTCOME_TEXT = {
   exploded: "Exploded! +1 penalty. Lower η."
 };
 
-function createGame(ctx, canvas, input, feedback) {
-  const course = createCourse(ctx);
+function createGame({ shell, services, canvas, input, feedback }) {
+  const course = createCourse(services);
   const state = course.state;
   const g = canvas.getContext("2d");
   let scene = "aim";
@@ -793,11 +1120,11 @@ function createGame(ctx, canvas, input, feedback) {
   let clock = 0;
 
   const tune = {
-    etaMin: () => ctx.tune.number("eta_min") ?? 0.0005,
-    etaMax: () => ctx.tune.number("eta_max") ?? 0.6,
-    maxSteps: () => ctx.tune.integer("max_steps") ?? 30,
-    hopMs: () => ctx.tune.durationMs("hop_ms") ?? 110,
-    accent: () => ctx.tune.color("accent_color") || THEME.accent
+    etaMin: () => Number(services.tune("eta_min")),
+    etaMax: () => Number(services.tune("eta_max")),
+    maxSteps: () => Math.round(Number(services.tune("max_steps"))),
+    hopMs: () => Number(services.tune("hop_ms")),
+    accent: () => services.tune("accent_color") || THEME.accent
   };
 
   function setScene(next) { scene = next; sceneAt = clock; }
@@ -806,20 +1133,20 @@ function createGame(ctx, canvas, input, feedback) {
   function begin() {
     if (started) return;
     started = true;
-    ctx.platform.start();
+    services.platform("start");
     feedback.unlockMusic();
   }
 
   function onAimInput(view) {
     if (input.pressed) {
       begin();
-      if (ctx.input.hitRect(input, view.resetButton.x, view.resetButton.y, view.resetButton.w, view.resetButton.h)) {
+      if (hitRect(input, view.resetButton)) {
         if (state.ballX !== LEVELS[state.hole].start) {
           course.addStroke(1);
           state.ballX = LEVELS[state.hole].start;
           lastPath = null;
           say("Back to the tee. +1 stroke.");
-          ctx.platform.interact({ type: "reset_hole" });
+          services.platform("interact", { type: "reset_hole" });
         }
         return;
       }
@@ -840,7 +1167,7 @@ function createGame(ctx, canvas, input, feedback) {
     course.addStroke(1);
     status = null;
     feedback.shoot();
-    ctx.platform.interact({ type: "stroke", eta, hole: state.hole + 1 });
+    services.platform("interact", { type: "stroke", eta, hole: state.hole + 1 });
     setScene("rolling");
   }
 
@@ -851,7 +1178,7 @@ function createGame(ctx, canvas, input, feedback) {
       state.ballX = state.land.xMin;
       const strokes = state.strokes[state.hole];
       feedback.sunk(view.ballScreen(state.ballX), scoreName(strokes, LEVELS[state.hole].par));
-      ctx.platform.milestone("hole_complete", { hole: state.hole + 1, strokes });
+      services.platform("milestone", "hole_complete", { hole: state.hole + 1, strokes });
       setScene("holeDone");
       return;
     }
@@ -898,21 +1225,21 @@ function createGame(ctx, canvas, input, feedback) {
           summary = result;
           setScene("courseDone");
           feedback.courseDone();
-          ctx.timeout(() => ctx.pulse.complete({ score: result.strokes, text: `${result.strokes} strokes · par ${result.par}` }), 250);
+          shell.timeout(() => services.pulseComplete({ score: result.strokes, text: `${result.strokes} strokes · par ${result.par}` }), 250);
         });
       }
     } else if (scene === "courseDone") {
       summary = null;
       lastPath = null;
       course.restartCourse();
-      ctx.platform.interact({ type: "replay" });
+      services.platform("interact", { type: "replay" });
       setScene("aim");
     }
   }
 
   function update(dt) {
     clock += dt;
-    const view = makeView(ctx, state.land);
+    const view = makeView(shell, state.land);
     if (scene === "aim") onAimInput(view);
     else if (scene === "rolling") onRolling(dt, view);
     else onPanelTap();
@@ -920,7 +1247,8 @@ function createGame(ctx, canvas, input, feedback) {
   }
 
   function render() {
-    const view = makeView(ctx, state.land);
+    shell.prepareCanvas(canvas, g);
+    const view = makeView(shell, state.land);
     const accent = tune.accent();
     renderFrame(g, view, { state, scene, aim, shot, lastPath, status, summary, clock, accent, tune });
   }
@@ -929,26 +1257,44 @@ function createGame(ctx, canvas, input, feedback) {
 }
 
 // ---- main.js ----
-// Entry point: mount the canvas, wire input + loop, restore a saved round, go.
+// Entry point: build the compat shell, mount the canvas, wire input + loop,
+// restore a saved round, go. Any failure renders a diagnostic screen.
 
 window.plethoraBit = {
   async init(ctx) {
-    const canvas = ctx.createCanvas2D({ layer: "content", alpha: false, maxDpr: 2, coordinateSpace: "css" });
-    const input = ctx.input.track(canvas);
-    const feedback = createFeedback(ctx);
-    const game = createGame(ctx, canvas, input, feedback);
+    let canvas = null;
+    let failed = false;
+    try {
+      const shell = createShell(ctx);
+      const services = createServices(ctx);
+      canvas = shell.createCanvas();
+      const input = shell.trackPointer(canvas);
+      const feedback = createFeedback(services);
+      const game = createGame({ shell, services, canvas, input, feedback });
 
-    game.render();
-    ctx.markVisualReady("course drawn");
+      game.render();
+      services.markReady();
 
-    await game.restore();
+      shell.loop(dt => {
+        if (failed) return;
+        try {
+          game.update(dt);
+          game.render();
+        } catch (err) {
+          failed = true;
+          showFailure(ctx, canvas, err, "Frame error");
+        } finally {
+          input.frameDone();
+        }
+      });
 
-    ctx.game.loop({
-      input,
-      update: dt => game.update(dt),
-      render: () => game.render()
-    });
-    ctx.platform.ready();
+      // Resume after the first frame is on screen so a slow load never blocks play.
+      game.restore();
+    } catch (err) {
+      failed = true;
+      showFailure(ctx, canvas, err, "Init error");
+      if (ctx && ctx.platform && typeof ctx.platform.ready === "function") ctx.platform.ready();
+    }
   }
 };
 

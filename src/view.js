@@ -1,5 +1,5 @@
 // Screen layout: where the plot, meter, and buttons live for the current size.
-// Recomputed every frame from ctx.width/height so rotation and resizes just work.
+// Recomputed every frame from the shell's size so rotation and resizes just work.
 
 const THEME = {
   bg: "#0c1015",
@@ -17,10 +17,10 @@ const THEME = {
   font: "system-ui, -apple-system, 'Segoe UI', sans-serif"
 };
 
-function makeView(ctx, land) {
-  const w = ctx.width;
-  const h = ctx.height;
-  const safe = ctx.safeArea || { top: 0, bottom: 0, left: 0, right: 0 };
+function makeView(shell, land) {
+  const w = shell.width();
+  const h = shell.height();
+  const safe = shell.safeArea();
   const padX = Math.max(20, safe.left, safe.right) + 4;
   const top = safe.top + 16;
 

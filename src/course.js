@@ -15,16 +15,12 @@ function scoreName(strokes, par) {
   return `+${diff}`;
 }
 
-function quietly(fn) {
-  Promise.resolve().then(fn).catch(() => {});
-}
-
 function totalPar() {
   return LEVELS.reduce((sum, level) => sum + level.par, 0);
 }
 
-function createCourse(ctx) {
-  const score = ctx.game.score({ initial: 0, min: 0 });
+function createCourse(services) {
+  const score = services.createScore();
   const state = { hole: 0, strokes: LEVELS.map(() => 0), ballX: 0, land: null };
 
   function loadHole(index) {
@@ -53,8 +49,9 @@ function createCourse(ctx) {
 
   async function restore() {
     try {
-      const saved = await ctx.game.progress.load(PROGRESS_CHANNEL);
-      if (!isValidSave(saved)) return false;
+      const saved = await services.progress.load(PROGRESS_CHANNEL);
+      // Never yank a player to another hole if they already started playing.
+      if (!isValidSave(saved) || total() > 0 || state.hole !== 0) return false;
       state.strokes = saved.state.strokes.slice();
       score.set(total(), { reason: "resume" });
       loadHole(saved.state.hole);
@@ -70,17 +67,17 @@ function createCourse(ctx) {
       label: `Hole ${state.hole + 1} of ${LEVELS.length}`,
       percent: Math.round((state.hole / LEVELS.length) * 100)
     };
-    quietly(() => ctx.game.progress.save(PROGRESS_CHANNEL, payload));
+    services.progress.save(PROGRESS_CHANNEL, payload);
   }
 
   async function finish() {
     const strokes = total();
     const par = totalPar();
-    quietly(() => ctx.game.progress.complete(PROGRESS_CHANNEL, {
+    services.progress.complete(PROGRESS_CHANNEL, {
       state: { hole: LEVELS.length - 1, strokes: state.strokes.slice(), finished: true },
       label: "Course complete",
       percent: 100
-    }));
+    });
     let best = false;
     try {
       const result = await score.submit(RECORD_CHANNEL, { label: `${strokes} strokes` });
@@ -88,12 +85,12 @@ function createCourse(ctx) {
     } catch (err) {
       best = false;
     }
-    ctx.platform.complete({ score: strokes, par });
+    services.platform("complete", { score: strokes, par });
     return { strokes, par, best };
   }
 
   function restartCourse() {
-    quietly(() => ctx.game.progress.abandon(PROGRESS_CHANNEL));
+    services.progress.abandon(PROGRESS_CHANNEL);
     state.strokes = LEVELS.map(() => 0);
     score.reset({ reason: "replay" });
     loadHole(0);
