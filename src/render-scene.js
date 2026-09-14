@@ -102,24 +102,3 @@ function drawTrail(g, view, path, upto) {
     g.fill();
   }
 }
-
-// Ghost of where the very first step lands, so η feels concrete while aiming.
-function drawStepPreview(g, view, land, theta, eta, accent) {
-  const next = theta - eta * land.grad(theta);
-  const from = view.ballScreen(theta);
-  const offCourse = next < 0 || next > 1;
-  const to = offCourse ? { x: view.plot.x + next * view.plot.w, y: from.y - 70 } : view.ballScreen(next);
-  const lift = Math.min(90, 10 + Math.abs(to.x - from.x) * 0.4);
-  g.setLineDash([4, 5]);
-  g.strokeStyle = offCourse ? THEME.danger : accent;
-  g.lineWidth = 2;
-  g.beginPath();
-  g.moveTo(from.x, from.y);
-  g.quadraticCurveTo((from.x + to.x) / 2, Math.min(from.y, to.y) - lift, to.x, to.y);
-  g.stroke();
-  g.setLineDash([]);
-  g.strokeStyle = offCourse ? THEME.danger : accent;
-  g.beginPath();
-  g.arc(to.x, to.y, 7, 0, Math.PI * 2);
-  g.stroke();
-}

@@ -1,6 +1,6 @@
 // Local contract checks against the Plethora schema limits and SDK anti-patterns.
 // Run after build: node tools/validate.mjs
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 const root = new URL("../", import.meta.url);
 const source = readFileSync(new URL("dist/main.js", root), "utf8");
@@ -56,6 +56,10 @@ banned.forEach(([re, name]) => check(!re.test(checked), `anti-pattern: ${name}`)
   [/createElement\(\s*["']canvas/, "raw canvas (use ctx.createCanvas2D)"]]
   .forEach(([re, name]) => check(!re.test(source), `server rule: ${name}`));
 check(Buffer.byteLength(source) < 2097152, "package too large");
+
+for (const file of readdirSync(new URL("src/", root))) {
+  check(source.includes(`// ---- ${file} ----`), `src/${file} is not in the build order (tools/build.mjs)`);
+}
 
 try { new Function(source); } catch (err) { errors.push(`syntax: ${err.message}`); }
 

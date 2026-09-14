@@ -40,7 +40,9 @@ function renderFrame(g, view, s) {
   else if (s.lastPath && scene === "aim" && !aim) drawTrail(g, view, s.lastPath, s.lastPath.length);
 
   const aiming = scene === "aim" && aim && aim.dist >= MIN_DRAG_PX;
-  if (aiming) drawStepPreview(g, view, land, state.ballX, aim.eta, s.accent);
+  const momentum = LEVELS[state.hole].momentum;
+  if (scene === "aim") drawSlopeLine(g, view, land, state.ballX);
+  if (aiming) drawGhostHops(g, view, land, state.ballX, aim.eta, momentum);
 
   if (scene === "rolling" && shot) {
     drawBall(g, rollingBallPosition(view, shot));
@@ -50,11 +52,12 @@ function renderFrame(g, view, s) {
   }
 
   drawHeader(g, view, state);
-  drawResetButton(g, view, scene === "aim" && state.ballX !== LEVELS[state.hole].start);
+  drawResetButton(g, view, scene === "aim" && state.ballX !== LEVELS[state.hole].start, s.suggestReset ? s.clock : null);
 
-  const eta = scene === "rolling" && shot ? shot.eta : aim ? aim.eta : 0;
-  drawMeter(g, view, land, eta || s.tune.etaMin(), s.tune.etaMin(), s.tune.etaMax(), s.accent,
-    aiming || scene === "rolling");
+  const eta = scene === "rolling" && shot ? shot.eta : aim ? aim.eta : s.tune.etaMin();
+  const showAim = aiming || scene === "rolling";
+  drawMeter(g, view, s.bands, eta, s.tune.etaMin(), s.tune.etaMax(), showAim);
+  if (aiming) drawEquation(g, view, land, state.ballX, aim.eta, momentum);
 
   if (scene === "rolling" && shot) {
     const step = Math.min(shot.hop + 1, shot.path.length - 1);

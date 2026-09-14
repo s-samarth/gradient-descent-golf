@@ -3,10 +3,11 @@
 const MIN_DRAG_PX = 14;
 
 const OUTCOME_TEXT = {
-  stuck: "Stuck in a local minimum. Try a bigger η.",
-  rattling: "Bouncing around the hole. Lower η.",
-  stopped: "Out of steps. Still descending…",
-  exploded: "Exploded! +1 penalty. Lower η."
+  stuck: "Stuck: the slope here is 0, so no η can move it. Reset and carry more speed.",
+  stalled: "Stopped on a gentle slope. A bigger η will get it moving.",
+  rattling: "Rolling around the hole. A smaller η will settle it.",
+  stopped: "Ran out of steps while still moving.",
+  exploded: "Overshoot! Each hop landed on steeper ground, so the next was bigger. +1"
 };
 
 function createGame({ shell, services, canvas, input, feedback }) {
@@ -22,6 +23,9 @@ function createGame({ shell, services, canvas, input, feedback }) {
   let summary = null;
   let started = false;
   let clock = 0;
+  let bands = [];
+  let suggestReset = false;
+  let bandsKey = "";
 
   const tune = {
     etaMin: () => Number(services.tune("eta_min")),
@@ -49,6 +53,7 @@ function createGame({ shell, services, canvas, input, feedback }) {
           course.addStroke(1);
           state.ballX = LEVELS[state.hole].start;
           lastPath = null;
+          suggestReset = false;
           say("Back to the tee. +1 stroke.");
           services.platform("interact", { type: "reset_hole" });
         }
@@ -66,8 +71,7 @@ function createGame({ shell, services, canvas, input, feedback }) {
   }
 
   function shoot(eta) {
-    const seed = strokeSeed(state.hole, state.strokes[state.hole]);
-    shot = { ...planStroke(state.land, state.ballX, eta, tune.maxSteps(), seed), hop: 0, t: 0, eta };
+    shot = { ...planStroke(state.land, state.ballX, eta, tune.maxSteps(), LEVELS[state.hole].momentum), hop: 0, t: 0, eta };
     course.addStroke(1);
     status = null;
     feedback.shoot();
@@ -92,8 +96,12 @@ function createGame({ shell, services, canvas, input, feedback }) {
       say(OUTCOME_TEXT.exploded, THEME.danger);
     } else {
       state.ballX = shot.end;
-      if (shot.outcome === "stuck") feedback.stuck(endPos, "local min");
-      say(OUTCOME_TEXT[shot.outcome]);
+      // A true valley floor (slope ≈ 0) can't be escaped by any η; say so and point at reset.
+      const trapped = shot.outcome === "stuck" && Math.abs(state.land.grad(state.ballX)) < 0.05;
+      suggestReset = trapped;
+      if (trapped) feedback.stuck(endPos, "side valley");
+      say(trapped ? OUTCOME_TEXT.stuck : OUTCOME_TEXT[shot.outcome === "stuck" ? "stalled" : shot.outcome], trapped ? THEME.accent : undefined);
+      if (trapped) status.until = clock + 6000;
     }
     setScene("aim");
   }
@@ -120,6 +128,7 @@ function createGame({ shell, services, canvas, input, feedback }) {
     if (scene === "holeDone") {
       lastPath = null;
       if (state.hole < LEVELS.length - 1) {
+        suggestReset = false;
         course.loadHole(state.hole + 1);
         course.checkpoint();
         setScene("aim");
@@ -141,8 +150,17 @@ function createGame({ shell, services, canvas, input, feedback }) {
     }
   }
 
+  // Meter colors depend on where the ball sits; recompute only when that changes.
+  function refreshBands() {
+    const key = `${state.hole}:${state.ballX}:${tune.etaMin()}:${tune.etaMax()}`;
+    if (key === bandsKey) return;
+    bandsKey = key;
+    bands = computeMeterBands(state.land, state.ballX, LEVELS[state.hole].momentum, tune.etaMin(), tune.etaMax());
+  }
+
   function update(dt) {
     clock += dt;
+    if (scene === "aim") refreshBands();
     const view = makeView(shell, state.land);
     if (scene === "aim") onAimInput(view);
     else if (scene === "rolling") onRolling(dt, view);
@@ -154,7 +172,8 @@ function createGame({ shell, services, canvas, input, feedback }) {
     shell.prepareCanvas(canvas, g);
     const view = makeView(shell, state.land);
     const accent = tune.accent();
-    renderFrame(g, view, { state, scene, aim, shot, lastPath, status, summary, clock, accent, tune });
+    if (!bands.length) refreshBands();
+    renderFrame(g, view, { state, scene, aim, shot, lastPath, status, summary, clock, accent, tune, bands, suggestReset });
   }
 
   return { update, render, restore: course.restore };

@@ -4,7 +4,7 @@
 const TUNING_DEFAULTS = {
   eta_min: 0.0005,
   eta_max: 0.6,
-  max_steps: 30,
+  max_steps: 40,
   hop_ms: 110,
   accent_color: "#ffd166",
   music_volume: 0.3

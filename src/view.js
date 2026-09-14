@@ -26,9 +26,9 @@ function makeView(shell, land) {
 
   const plot = {
     x: padX,
-    y: top + 118,
+    y: top + 136,
     w: w - padX * 2,
-    h: Math.max(160, h - safe.bottom - 150 - (top + 118))
+    h: Math.max(160, h - safe.bottom - 150 - (top + 136))
   };
   const meter = { x: padX + 8, y: plot.y + plot.h + 58, w: w - padX * 2 - 16, h: 10 };
   const resetButton = { x: w - padX - 84, y: top + 52, w: 84, h: 34 };

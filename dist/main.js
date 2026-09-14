@@ -143,7 +143,7 @@ function hitRect(p, r) {
 const TUNING_DEFAULTS = {
   eta_min: 0.0005,
   eta_max: 0.6,
-  max_steps: 30,
+  max_steps: 40,
   hop_ms: 110,
   accent_color: "#ffd166",
   music_volume: 0.3
@@ -342,77 +342,77 @@ function wrapText(g, text, maxWidth) {
 
 // ---- levels.js ----
 // Nine holes. bowl = a·(θ − c)², dips = Gaussian valleys, curvature = f''
-// at the global minimum (critical η = 2 / curvature). noise = SGD gradient noise (kick size scales with η). Check with tools/solve.mjs.
+// at the global minimum (critical η = 2 / curvature). momentum = β, how much speed the ball keeps between steps. Check with tools/solve.mjs.
 
 const LEVELS = [
   {
     name: "Convex warmup",
-    tip: "One valley. Any sane η gets you there.",
-    bowl: { a: 1, c: 0.62 }, dips: [], start: 0.06, noise: 0, curvature: 30, par: 2
+    tip: "Each hop = η × slope. Steep ground, big hop.",
+    bowl: { a: 1, c: 0.62 }, dips: [], start: 0.06, momentum: 0, curvature: 30, par: 2
   },
   {
     name: "Steep bowl",
-    tip: "High curvature. Too much η and you bounce out.",
-    bowl: { a: 1, c: 0.4 }, dips: [], start: 0.94, noise: 0, curvature: 140, par: 2
+    tip: "Walls this steep turn a big η into a ping-pong.",
+    bowl: { a: 1, c: 0.4 }, dips: [], start: 0.94, momentum: 0, curvature: 140, par: 2
   },
   {
     name: "Local trap",
-    tip: "Noisy gradients now. Bigger η, bigger kicks.",
+    tip: "Momentum on: the ball keeps its speed over small dips.",
     bowl: { a: 1.4, c: 0.6 },
     dips: [{ mu: 0.28, depth: 0.22, sigma: 0.045 }, { mu: 0.72, depth: 0.12, sigma: 0.05 }],
-    start: 0.05, noise: 0.6, curvature: 40, par: 3
+    start: 0.16, momentum: 0.9, curvature: 40, par: 3
   },
   {
     name: "The plateau",
-    tip: "Flat ground, tiny gradients. Crawl or leap?",
+    tip: "Flat ground means tiny slope. Momentum builds speed.",
     bowl: { a: 0.15, c: 0.9 },
     dips: [{ mu: 0.82, depth: 0.2, sigma: 0.06 }],
-    start: 0.08, noise: 0.5, curvature: 45, par: 4
+    start: 0.08, momentum: 0.8, curvature: 45, par: 3
   },
   {
     name: "Narrow minimum",
-    tip: "Sharp hole. Finish with a gentle η.",
+    tip: "Sharp hole. Too much η and you hop right over it.",
     bowl: { a: 0.9, c: 0.52 },
     dips: [{ mu: 0.52, depth: 0.08, sigma: 0.018 }],
-    start: 0.92, noise: 0.4, curvature: 160, par: 3
+    start: 0.84, momentum: 0.9, curvature: 160, par: 2
   },
   {
     name: "Twin valleys",
-    tip: "Two look alike. Only one is global.",
-    bowl: { a: 0.6, c: 0.5 },
-    dips: [{ mu: 0.25, depth: 0.2, sigma: 0.06 }, { mu: 0.75, depth: 0.3, sigma: 0.06 }],
-    start: 0.08, noise: 1.2, curvature: 50, par: 5
+    tip: "Roll through the first valley into the deeper one.",
+    bowl: { a: 1.8, c: 0.5 },
+    dips: [{ mu: 0.3, depth: 0.15, sigma: 0.06 }, { mu: 0.7, depth: 0.25, sigma: 0.07 }],
+    start: 0.04, momentum: 0.7, curvature: 50, par: 5
   },
   {
     name: "Bumpy loss",
-    tip: "Noise everywhere. Momentum would help. You don't have it.",
+    tip: "Less momentum now. Too small an η stalls in a dip.",
     bowl: { a: 1.2, c: 0.5 },
     dips: [
       { mu: 0.15, depth: 0.05, sigma: 0.025 }, { mu: 0.32, depth: 0.06, sigma: 0.025 },
       { mu: 0.5, depth: 0.1, sigma: 0.03 }, { mu: 0.68, depth: 0.06, sigma: 0.025 },
       { mu: 0.85, depth: 0.05, sigma: 0.025 }
     ],
-    start: 0.06, noise: 0.8, curvature: 60, par: 4
+    start: 0.06, momentum: 0.6, curvature: 60, par: 5
   },
   {
     name: "Overfit hills",
-    tip: "The deepest point hides behind a ridge.",
-    bowl: { a: 0.7, c: 0.6 },
+    tip: "Two traps on the way down. Keep your speed up.",
+    bowl: { a: 2.6, c: 0.7 },
     dips: [
-      { mu: 0.3, depth: 0.1, sigma: 0.05 }, { mu: 0.55, depth: 0.06, sigma: 0.03 },
-      { mu: 0.84, depth: 0.3, sigma: 0.045 }
+      { mu: 0.28, depth: 0.1, sigma: 0.04 }, { mu: 0.5, depth: 0.1, sigma: 0.03 },
+      { mu: 0.74, depth: 0.2, sigma: 0.04 }
     ],
-    start: 0.08, noise: 0.8, curvature: 80, par: 5
+    start: 0.1, momentum: 0.6, curvature: 80, par: 4
   },
   {
     name: "The final epoch",
-    tip: "Everything you learned. Converge.",
+    tip: "Par 3. Everything you learned. Converge.",
     bowl: { a: 1, c: 0.55 },
     dips: [
       { mu: 0.12, depth: 0.1, sigma: 0.03 }, { mu: 0.36, depth: 0.12, sigma: 0.04 },
       { mu: 0.63, depth: 0.22, sigma: 0.04 }, { mu: 0.8, depth: 0.1, sigma: 0.04 }
     ],
-    start: 0.92, noise: 0.8, curvature: 120, par: 5
+    start: 0.92, momentum: 0.8, curvature: 120, par: 3
   }
 ];
 
@@ -485,64 +485,78 @@ function makeLandscape(level) {
 }
 
 // ---- descent.js ----
-// One "stroke" = running stochastic gradient descent from the ball's position
-// with a fixed learning rate until it sinks, settles, explodes, or runs out of steps.
-// Gradient noise is seeded per hole + stroke, so the same shot always plays the same.
+// One "stroke" = gradient descent with momentum (the "heavy ball" method):
+//   v ← β·v − η·slope,   θ ← θ + v
+// β = 0 is plain gradient descent. Fully deterministic, so the aim preview never lies.
 
 const DESCENT = {
   holeRadius: 0.02,
   settledStep: 0.006
 };
 
-function seededNormal(seed) {
-  let a = seed >>> 0;
-  const uniform = () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-  return () => {
-    const u = Math.max(1e-9, uniform());
-    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * uniform());
-  };
+function descentStep(land, x, v, eta, momentum) {
+  const nextV = momentum * v - eta * land.grad(x);
+  return { x: x + nextV, v: nextV };
 }
 
-function planStroke(land, x0, eta, maxSteps, seed = 1) {
-  const noise = land.level.noise || 0;
-  const normal = seededNormal(seed);
+function planStroke(land, x0, eta, maxSteps, momentum = 0) {
   const path = [x0];
   let x = x0;
+  let v = 0;
   for (let i = 0; i < maxSteps; i++) {
-    const next = x - eta * (land.grad(x) + noise * normal());
-    if (!Number.isFinite(next) || next < 0 || next > 1) {
-      path.push(next < 0 ? -0.08 : 1.08);
+    ({ x, v } = descentStep(land, x, v, eta, momentum));
+    if (!Number.isFinite(x) || x < 0 || x > 1) {
+      path.push(x < 0 || !Number.isFinite(x) ? -0.08 : 1.08);
       return { path, outcome: "exploded", end: x0 };
     }
-    const step = Math.abs(next - x);
-    path.push(next);
-    x = next;
-    if (Math.abs(x - land.xMin) < DESCENT.holeRadius && step < DESCENT.settledStep) {
+    path.push(x);
+    if (Math.abs(x - land.xMin) < DESCENT.holeRadius && Math.abs(v) < DESCENT.settledStep) {
       return { path, outcome: "sunk", end: x };
     }
   }
-  const lastStep = Math.abs(path[path.length - 1] - path[path.length - 2]);
   const inHole = Math.abs(x - land.xMin) < DESCENT.holeRadius;
   let outcome = "stopped";
   if (inHole) outcome = "rattling";
-  else if (lastStep < DESCENT.settledStep) outcome = "stuck";
+  else if (Math.abs(v) < DESCENT.settledStep) outcome = "stuck";
   return { path, outcome, end: x };
 }
 
-function strokeSeed(hole, strokesSoFar) {
-  return (hole + 1) * 7919 + strokesSoFar * 104729;
+// What the next few steps look like from here, for the aim preview and meter colors.
+// "explode": leaves the course. "overshoot": jumps back and forth with growing steps.
+// "bouncy": crosses the valley but calms down. "smooth": heads downhill. "crawl": barely moves.
+function classifyShot(land, x0, eta, momentum, steps = 8) {
+  let x = x0;
+  let v = 0;
+  let prevStep = 0;
+  let flips = 0;
+  let growing = 0;
+  let travelled = 0;
+  for (let i = 0; i < steps; i++) {
+    const next = descentStep(land, x, v, eta, momentum);
+    if (!Number.isFinite(next.x) || next.x < 0 || next.x > 1) return "explode";
+    const step = next.x - x;
+    if (prevStep && Math.sign(step) !== Math.sign(prevStep)) {
+      flips += 1;
+      if (Math.abs(step) > Math.abs(prevStep) * 1.05) growing += 1;
+    }
+    travelled += Math.abs(step);
+    prevStep = step;
+    ({ x, v } = next);
+  }
+  if (growing >= 2) return "overshoot";
+  if (flips >= 2) return "bouncy";
+  if (travelled < 0.01) return "crawl";
+  return "smooth";
 }
 
 // Drag distance → learning rate on a log scale, so small and large η both get room.
 function etaFromDrag(distance, span, etaMin, etaMax) {
   const t = Math.min(1, Math.max(0, distance / span));
   return etaMin * Math.pow(etaMax / etaMin, t);
+}
+
+function etaToFraction(eta, etaMin, etaMax) {
+  return Math.log(eta / etaMin) / Math.log(etaMax / etaMin);
 }
 
 function formatEta(eta) {
@@ -580,9 +594,9 @@ function makeView(shell, land) {
 
   const plot = {
     x: padX,
-    y: top + 118,
+    y: top + 136,
     w: w - padX * 2,
-    h: Math.max(160, h - safe.bottom - 150 - (top + 118))
+    h: Math.max(160, h - safe.bottom - 150 - (top + 136))
   };
   const meter = { x: padX + 8, y: plot.y + plot.h + 58, w: w - padX * 2 - 16, h: 10 };
   const resetButton = { x: w - padX - 84, y: top + 52, w: 84, h: 34 };
@@ -719,29 +733,8 @@ function drawTrail(g, view, path, upto) {
   }
 }
 
-// Ghost of where the very first step lands, so η feels concrete while aiming.
-function drawStepPreview(g, view, land, theta, eta, accent) {
-  const next = theta - eta * land.grad(theta);
-  const from = view.ballScreen(theta);
-  const offCourse = next < 0 || next > 1;
-  const to = offCourse ? { x: view.plot.x + next * view.plot.w, y: from.y - 70 } : view.ballScreen(next);
-  const lift = Math.min(90, 10 + Math.abs(to.x - from.x) * 0.4);
-  g.setLineDash([4, 5]);
-  g.strokeStyle = offCourse ? THEME.danger : accent;
-  g.lineWidth = 2;
-  g.beginPath();
-  g.moveTo(from.x, from.y);
-  g.quadraticCurveTo((from.x + to.x) / 2, Math.min(from.y, to.y) - lift, to.x, to.y);
-  g.stroke();
-  g.setLineDash([]);
-  g.strokeStyle = offCourse ? THEME.danger : accent;
-  g.beginPath();
-  g.arc(to.x, to.y, 7, 0, Math.PI * 2);
-  g.stroke();
-}
-
 // ---- render-hud.js ----
-// HUD: hole header, reset button, learning-rate meter, and result panels.
+// HUD: hole header, reset button, status line, and result panels.
 
 function drawHeader(g, view, state) {
   const level = LEVELS[state.hole];
@@ -766,12 +759,20 @@ function drawHeader(g, view, state) {
   g.fillText(`STROKES · PAR ${level.par}`, view.w - x, view.top + 12);
 }
 
-function drawResetButton(g, view, enabled) {
+// pulseClock: pass the game clock to make the button glow (used when reset is the only way out).
+function drawResetButton(g, view, enabled, pulseClock) {
   const b = view.resetButton;
   g.globalAlpha = enabled ? 1 : 0.35;
   roundRectPath(g, b.x, b.y, b.w, b.h, 17);
-  g.strokeStyle = THEME.axis;
-  g.lineWidth = 1;
+  if (pulseClock !== null && pulseClock !== undefined && enabled) {
+    g.fillStyle = `rgba(255,209,102,${0.18 + 0.14 * Math.sin(pulseClock / 180)})`;
+    g.fill();
+    g.strokeStyle = THEME.accent;
+    g.lineWidth = 2;
+  } else {
+    g.strokeStyle = THEME.axis;
+    g.lineWidth = 1;
+  }
   g.stroke();
   g.fillStyle = THEME.ink;
   g.font = `600 13px ${THEME.font}`;
@@ -780,52 +781,14 @@ function drawResetButton(g, view, enabled) {
   g.globalAlpha = 1;
 }
 
-function drawMeter(g, view, land, eta, etaMin, etaMax, accent, active) {
-  const m = view.meter;
-  const toX = v => m.x + (Math.log(v / etaMin) / Math.log(etaMax / etaMin)) * m.w;
-  const critX = Math.min(m.x + m.w, Math.max(m.x, toX(land.criticalEta)));
-
-  roundRectPath(g, m.x, m.y, m.w, m.h, m.h / 2);
-  g.fillStyle = "rgba(255,255,255,0.08)";
-  g.fill();
-  g.save();
-  roundRectPath(g, m.x, m.y, m.w, m.h, m.h / 2);
-  g.clip();
-  g.fillStyle = "rgba(255,107,107,0.28)";
-  g.fillRect(critX, m.y, m.x + m.w - critX, m.h);
-  g.restore();
-
-  g.textAlign = "left";
-  g.font = `600 11px ${THEME.font}`;
-  g.fillStyle = THEME.muted;
-  g.fillText("crawl", m.x, m.y + 26);
-  g.textAlign = "right";
-  g.fillStyle = THEME.danger;
-  g.fillText("diverge near the hole →", m.x + m.w, m.y + 26);
-
-  if (!active) {
-    g.textAlign = "center";
-    g.fillStyle = THEME.muted;
-    g.font = `600 14px ${THEME.font}`;
-    g.fillText("Drag anywhere to set η, release to descend", view.w / 2, m.y - 18);
-    return;
-  }
-  const x = toX(eta);
-  g.fillStyle = eta > land.criticalEta ? THEME.danger : accent;
-  g.beginPath();
-  g.arc(x, m.y + m.h / 2, 9, 0, Math.PI * 2);
-  g.fill();
-  g.textAlign = "center";
-  g.font = `700 22px ${THEME.font}`;
-  g.fillText(`η = ${formatEta(eta)}`, view.w / 2, m.y - 16);
-}
-
 function drawStatus(g, view, text, color) {
   if (!text) return;
   g.textAlign = "center";
   g.fillStyle = color || THEME.ink;
-  g.font = `700 16px ${THEME.font}`;
-  g.fillText(text, view.w / 2, view.plot.y - 12);
+  g.font = `700 15px ${THEME.font}`;
+  const lines = wrapText(g, text, view.w - 32).slice(0, 2);
+  const bottom = view.plot.y - 10;
+  lines.forEach((line, i) => g.fillText(line.trim(), view.w / 2, bottom - (lines.length - 1 - i) * 19));
 }
 
 function drawPanel(g, view, title, lines, cta) {
@@ -849,6 +812,191 @@ function drawPanel(g, view, title, lines, cta) {
   g.fillStyle = THEME.accent;
   g.font = `700 14px ${THEME.font}`;
   g.fillText(cta, view.w / 2, y + h - 16);
+}
+
+// ---- render-guides.js ----
+// Aim guides that make the math visible: the slope under the ball, ghost dots for
+// the next few hops, the live "hop = η × slope" readout, and a meter colored by
+// what each η would do from where the ball is right now.
+
+const BAND_COLORS = {
+  crawl: "rgba(238,243,238,0.28)",
+  smooth: "#5fd39a",
+  bouncy: "#ffd166",
+  overshoot: "#ff9f5a",
+  explode: "#ff6b6b"
+};
+
+const METER_SAMPLES = 48;
+
+function computeMeterBands(land, theta, momentum, etaMin, etaMax) {
+  const bands = [];
+  for (let i = 0; i <= METER_SAMPLES; i++) {
+    const eta = etaFromDrag(i, METER_SAMPLES, etaMin, etaMax);
+    bands.push(classifyShot(land, theta, eta, momentum));
+  }
+  return bands;
+}
+
+// Arrow along the ground pointing downhill; longer arrow = steeper slope = bigger hop.
+function drawSlopeLine(g, view, land, theta) {
+  const pos = view.ballScreen(theta);
+  const slope = land.grad(theta);
+  if (Math.abs(slope) < 0.05) {
+    g.fillStyle = THEME.accent;
+    g.font = `700 12px ${THEME.font}`;
+    g.textAlign = "center";
+    g.fillText("flat here · slope 0", Math.min(view.w - 70, Math.max(70, pos.x)), pos.y - 22);
+    return;
+  }
+  const h = 0.002;
+  const a = view.toScreen(theta - h, land.loss(Math.max(0, theta - h)));
+  const b = view.toScreen(theta + h, land.loss(Math.min(1, theta + h)));
+  let angle = Math.atan2(b.y - a.y, b.x - a.x);
+  if (slope > 0) angle += Math.PI; // point toward lower loss
+  const len = 22 + Math.min(1, Math.abs(slope) / 20) * 48;
+  const baseX = pos.x;
+  const baseY = pos.y - 16;
+  const tipX = baseX + Math.cos(angle) * len;
+  const tipY = baseY + Math.sin(angle) * len;
+  g.strokeStyle = THEME.accent;
+  g.fillStyle = THEME.accent;
+  g.lineWidth = 3;
+  g.lineCap = "round";
+  g.beginPath();
+  g.moveTo(baseX, baseY);
+  g.lineTo(tipX, tipY);
+  g.stroke();
+  g.beginPath();
+  g.moveTo(tipX + Math.cos(angle) * 6, tipY + Math.sin(angle) * 6);
+  g.lineTo(tipX + Math.cos(angle + 2.4) * 9, tipY + Math.sin(angle + 2.4) * 9);
+  g.lineTo(tipX + Math.cos(angle - 2.4) * 9, tipY + Math.sin(angle - 2.4) * 9);
+  g.closePath();
+  g.fill();
+  g.lineCap = "butt";
+  g.font = `700 12px ${THEME.font}`;
+  g.textAlign = "center";
+  const label = `downhill · slope ${Math.abs(slope).toFixed(1)}`;
+  const half = g.measureText(label).width / 2 + 8;
+  const labelX = Math.min(view.w - half, Math.max(half, baseX));
+  g.fillText(label, labelX, baseY - 14);
+}
+
+function drawGhostHops(g, view, land, theta, eta, momentum, count = 4) {
+  let x = theta;
+  let v = 0;
+  let from = view.ballScreen(x);
+  for (let i = 1; i <= count; i++) {
+    ({ x, v } = descentStep(land, x, v, eta, momentum));
+    const off = !Number.isFinite(x) || x < 0 || x > 1;
+    const to = off
+      ? { x: view.plot.x + Math.min(1.1, Math.max(-0.1, x || 0)) * view.plot.w, y: view.plot.y - 10 }
+      : view.ballScreen(x);
+    const lift = Math.min(90, 8 + Math.abs(to.x - from.x) * 0.35);
+    const alpha = 1 - (i - 1) * 0.2;
+    g.globalAlpha = alpha;
+    g.setLineDash([4, 5]);
+    g.strokeStyle = off ? THEME.danger : "rgba(255,255,255,0.7)";
+    g.lineWidth = 1.5;
+    g.beginPath();
+    g.moveTo(from.x, from.y);
+    g.quadraticCurveTo((from.x + to.x) / 2, Math.min(from.y, to.y) - lift, to.x, to.y);
+    g.stroke();
+    g.setLineDash([]);
+    g.fillStyle = off ? THEME.danger : "rgba(255,255,255,0.85)";
+    g.beginPath();
+    g.arc(to.x, to.y, 4.5, 0, Math.PI * 2);
+    g.fill();
+    g.font = `700 10px ${THEME.font}`;
+    g.textAlign = "center";
+    g.fillText(String(i), to.x, to.y - 9);
+    g.globalAlpha = 1;
+    if (off) break;
+    from = to;
+  }
+}
+
+function drawEquation(g, view, land, theta, eta, momentum) {
+  const slope = land.grad(theta);
+  const hop = eta * slope;
+  const m = view.meter;
+  g.textAlign = "center";
+  g.font = `600 13px ${THEME.font}`;
+  g.fillStyle = THEME.ink;
+  const base = `first hop = η × slope = ${formatEta(eta)} × ${Math.abs(slope).toFixed(1)} = ${Math.abs(hop).toFixed(3)}`;
+  g.fillText(base, view.w / 2, m.y + 44, view.w - 24);
+  const theta2 = theta - hop;
+  if (theta2 < 0 || theta2 > 1) {
+    g.fillStyle = THEME.danger;
+    g.font = `600 12px ${THEME.font}`;
+    g.fillText("That first hop is longer than the whole course (width 1.0)", view.w / 2, m.y + 62, view.w - 24);
+  } else if (momentum > 0) {
+    g.fillStyle = THEME.muted;
+    g.font = `12px ${THEME.font}`;
+    g.fillText(`then momentum β = ${momentum} keeps ${Math.round(momentum * 100)}% of the speed each hop`, view.w / 2, m.y + 62, view.w - 24);
+  }
+}
+
+function drawMeter(g, view, bands, eta, etaMin, etaMax, active) {
+  const m = view.meter;
+  const segW = m.w / bands.length;
+  g.save();
+  roundRectPath(g, m.x, m.y, m.w, m.h, m.h / 2);
+  g.clip();
+  bands.forEach((kind, i) => {
+    g.fillStyle = BAND_COLORS[kind] || BAND_COLORS.crawl;
+    g.fillRect(m.x + i * segW, m.y, segW + 0.5, m.h);
+  });
+  g.restore();
+
+  if (!active) {
+    g.textAlign = "center";
+    g.fillStyle = THEME.muted;
+    g.font = `600 14px ${THEME.font}`;
+    g.fillText("Drag anywhere to set η, release to descend", view.w / 2, m.y - 16);
+    drawMeterLegend(g, view);
+    return;
+  }
+  const t = Math.min(1, Math.max(0, etaToFraction(eta, etaMin, etaMax)));
+  const kind = bands[Math.round(t * (bands.length - 1))];
+  const x = m.x + t * m.w;
+  g.fillStyle = "#ffffff";
+  g.beginPath();
+  g.arc(x, m.y + m.h / 2, 9, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = BAND_COLORS[kind] || THEME.ink;
+  g.beginPath();
+  g.arc(x, m.y + m.h / 2, 5, 0, Math.PI * 2);
+  g.fill();
+  g.textAlign = "center";
+  g.font = `700 20px ${THEME.font}`;
+  g.fillText(`η = ${formatEta(eta)} · ${METER_LABELS[kind] || kind}`, view.w / 2, m.y - 14);
+}
+
+const METER_LABELS = {
+  crawl: "barely moves",
+  smooth: "smooth",
+  bouncy: "bouncy",
+  overshoot: "overshooting",
+  explode: "flies off"
+};
+
+function drawMeterLegend(g, view) {
+  const items = [["crawl", "stuck"], ["smooth", "smooth"], ["bouncy", "bouncy"], ["overshoot", "overshoot"], ["explode", "flies off"]];
+  const y = view.meter.y + 28;
+  const step = Math.min(80, (view.w - 24) / items.length);
+  let x = view.w / 2 - (step * items.length) / 2 + 6;
+  g.font = `600 11px ${THEME.font}`;
+  g.textAlign = "left";
+  for (const [kind, label] of items) {
+    g.fillStyle = BAND_COLORS[kind];
+    g.beginPath();
+    g.arc(x, y - 4, 4, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = THEME.muted;
+    g.fillText(label, x + 8, y);
+    x += step;
+  }
 }
 
 // ---- render-frame.js ----
@@ -894,7 +1042,9 @@ function renderFrame(g, view, s) {
   else if (s.lastPath && scene === "aim" && !aim) drawTrail(g, view, s.lastPath, s.lastPath.length);
 
   const aiming = scene === "aim" && aim && aim.dist >= MIN_DRAG_PX;
-  if (aiming) drawStepPreview(g, view, land, state.ballX, aim.eta, s.accent);
+  const momentum = LEVELS[state.hole].momentum;
+  if (scene === "aim") drawSlopeLine(g, view, land, state.ballX);
+  if (aiming) drawGhostHops(g, view, land, state.ballX, aim.eta, momentum);
 
   if (scene === "rolling" && shot) {
     drawBall(g, rollingBallPosition(view, shot));
@@ -904,11 +1054,12 @@ function renderFrame(g, view, s) {
   }
 
   drawHeader(g, view, state);
-  drawResetButton(g, view, scene === "aim" && state.ballX !== LEVELS[state.hole].start);
+  drawResetButton(g, view, scene === "aim" && state.ballX !== LEVELS[state.hole].start, s.suggestReset ? s.clock : null);
 
-  const eta = scene === "rolling" && shot ? shot.eta : aim ? aim.eta : 0;
-  drawMeter(g, view, land, eta || s.tune.etaMin(), s.tune.etaMin(), s.tune.etaMax(), s.accent,
-    aiming || scene === "rolling");
+  const eta = scene === "rolling" && shot ? shot.eta : aim ? aim.eta : s.tune.etaMin();
+  const showAim = aiming || scene === "rolling";
+  drawMeter(g, view, s.bands, eta, s.tune.etaMin(), s.tune.etaMax(), showAim);
+  if (aiming) drawEquation(g, view, land, state.ballX, aim.eta, momentum);
 
   if (scene === "rolling" && shot) {
     const step = Math.min(shot.hop + 1, shot.path.length - 1);
@@ -1099,10 +1250,11 @@ function createFeedback(services) {
 const MIN_DRAG_PX = 14;
 
 const OUTCOME_TEXT = {
-  stuck: "Stuck in a local minimum. Try a bigger η.",
-  rattling: "Bouncing around the hole. Lower η.",
-  stopped: "Out of steps. Still descending…",
-  exploded: "Exploded! +1 penalty. Lower η."
+  stuck: "Stuck: the slope here is 0, so no η can move it. Reset and carry more speed.",
+  stalled: "Stopped on a gentle slope. A bigger η will get it moving.",
+  rattling: "Rolling around the hole. A smaller η will settle it.",
+  stopped: "Ran out of steps while still moving.",
+  exploded: "Overshoot! Each hop landed on steeper ground, so the next was bigger. +1"
 };
 
 function createGame({ shell, services, canvas, input, feedback }) {
@@ -1118,6 +1270,9 @@ function createGame({ shell, services, canvas, input, feedback }) {
   let summary = null;
   let started = false;
   let clock = 0;
+  let bands = [];
+  let suggestReset = false;
+  let bandsKey = "";
 
   const tune = {
     etaMin: () => Number(services.tune("eta_min")),
@@ -1145,6 +1300,7 @@ function createGame({ shell, services, canvas, input, feedback }) {
           course.addStroke(1);
           state.ballX = LEVELS[state.hole].start;
           lastPath = null;
+          suggestReset = false;
           say("Back to the tee. +1 stroke.");
           services.platform("interact", { type: "reset_hole" });
         }
@@ -1162,8 +1318,7 @@ function createGame({ shell, services, canvas, input, feedback }) {
   }
 
   function shoot(eta) {
-    const seed = strokeSeed(state.hole, state.strokes[state.hole]);
-    shot = { ...planStroke(state.land, state.ballX, eta, tune.maxSteps(), seed), hop: 0, t: 0, eta };
+    shot = { ...planStroke(state.land, state.ballX, eta, tune.maxSteps(), LEVELS[state.hole].momentum), hop: 0, t: 0, eta };
     course.addStroke(1);
     status = null;
     feedback.shoot();
@@ -1188,8 +1343,12 @@ function createGame({ shell, services, canvas, input, feedback }) {
       say(OUTCOME_TEXT.exploded, THEME.danger);
     } else {
       state.ballX = shot.end;
-      if (shot.outcome === "stuck") feedback.stuck(endPos, "local min");
-      say(OUTCOME_TEXT[shot.outcome]);
+      // A true valley floor (slope ≈ 0) can't be escaped by any η; say so and point at reset.
+      const trapped = shot.outcome === "stuck" && Math.abs(state.land.grad(state.ballX)) < 0.05;
+      suggestReset = trapped;
+      if (trapped) feedback.stuck(endPos, "side valley");
+      say(trapped ? OUTCOME_TEXT.stuck : OUTCOME_TEXT[shot.outcome === "stuck" ? "stalled" : shot.outcome], trapped ? THEME.accent : undefined);
+      if (trapped) status.until = clock + 6000;
     }
     setScene("aim");
   }
@@ -1216,6 +1375,7 @@ function createGame({ shell, services, canvas, input, feedback }) {
     if (scene === "holeDone") {
       lastPath = null;
       if (state.hole < LEVELS.length - 1) {
+        suggestReset = false;
         course.loadHole(state.hole + 1);
         course.checkpoint();
         setScene("aim");
@@ -1237,8 +1397,17 @@ function createGame({ shell, services, canvas, input, feedback }) {
     }
   }
 
+  // Meter colors depend on where the ball sits; recompute only when that changes.
+  function refreshBands() {
+    const key = `${state.hole}:${state.ballX}:${tune.etaMin()}:${tune.etaMax()}`;
+    if (key === bandsKey) return;
+    bandsKey = key;
+    bands = computeMeterBands(state.land, state.ballX, LEVELS[state.hole].momentum, tune.etaMin(), tune.etaMax());
+  }
+
   function update(dt) {
     clock += dt;
+    if (scene === "aim") refreshBands();
     const view = makeView(shell, state.land);
     if (scene === "aim") onAimInput(view);
     else if (scene === "rolling") onRolling(dt, view);
@@ -1250,7 +1419,8 @@ function createGame({ shell, services, canvas, input, feedback }) {
     shell.prepareCanvas(canvas, g);
     const view = makeView(shell, state.land);
     const accent = tune.accent();
-    renderFrame(g, view, { state, scene, aim, shot, lastPath, status, summary, clock, accent, tune });
+    if (!bands.length) refreshBands();
+    renderFrame(g, view, { state, scene, aim, shot, lastPath, status, summary, clock, accent, tune, bands, suggestReset });
   }
 
   return { update, render, restore: course.restore };

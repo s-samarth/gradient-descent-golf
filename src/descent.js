@@ -1,61 +1,75 @@
-// One "stroke" = running stochastic gradient descent from the ball's position
-// with a fixed learning rate until it sinks, settles, explodes, or runs out of steps.
-// Gradient noise is seeded per hole + stroke, so the same shot always plays the same.
+// One "stroke" = gradient descent with momentum (the "heavy ball" method):
+//   v ← β·v − η·slope,   θ ← θ + v
+// β = 0 is plain gradient descent. Fully deterministic, so the aim preview never lies.
 
 const DESCENT = {
   holeRadius: 0.02,
   settledStep: 0.006
 };
 
-function seededNormal(seed) {
-  let a = seed >>> 0;
-  const uniform = () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-  return () => {
-    const u = Math.max(1e-9, uniform());
-    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * uniform());
-  };
+function descentStep(land, x, v, eta, momentum) {
+  const nextV = momentum * v - eta * land.grad(x);
+  return { x: x + nextV, v: nextV };
 }
 
-function planStroke(land, x0, eta, maxSteps, seed = 1) {
-  const noise = land.level.noise || 0;
-  const normal = seededNormal(seed);
+function planStroke(land, x0, eta, maxSteps, momentum = 0) {
   const path = [x0];
   let x = x0;
+  let v = 0;
   for (let i = 0; i < maxSteps; i++) {
-    const next = x - eta * (land.grad(x) + noise * normal());
-    if (!Number.isFinite(next) || next < 0 || next > 1) {
-      path.push(next < 0 ? -0.08 : 1.08);
+    ({ x, v } = descentStep(land, x, v, eta, momentum));
+    if (!Number.isFinite(x) || x < 0 || x > 1) {
+      path.push(x < 0 || !Number.isFinite(x) ? -0.08 : 1.08);
       return { path, outcome: "exploded", end: x0 };
     }
-    const step = Math.abs(next - x);
-    path.push(next);
-    x = next;
-    if (Math.abs(x - land.xMin) < DESCENT.holeRadius && step < DESCENT.settledStep) {
+    path.push(x);
+    if (Math.abs(x - land.xMin) < DESCENT.holeRadius && Math.abs(v) < DESCENT.settledStep) {
       return { path, outcome: "sunk", end: x };
     }
   }
-  const lastStep = Math.abs(path[path.length - 1] - path[path.length - 2]);
   const inHole = Math.abs(x - land.xMin) < DESCENT.holeRadius;
   let outcome = "stopped";
   if (inHole) outcome = "rattling";
-  else if (lastStep < DESCENT.settledStep) outcome = "stuck";
+  else if (Math.abs(v) < DESCENT.settledStep) outcome = "stuck";
   return { path, outcome, end: x };
 }
 
-function strokeSeed(hole, strokesSoFar) {
-  return (hole + 1) * 7919 + strokesSoFar * 104729;
+// What the next few steps look like from here, for the aim preview and meter colors.
+// "explode": leaves the course. "overshoot": jumps back and forth with growing steps.
+// "bouncy": crosses the valley but calms down. "smooth": heads downhill. "crawl": barely moves.
+function classifyShot(land, x0, eta, momentum, steps = 8) {
+  let x = x0;
+  let v = 0;
+  let prevStep = 0;
+  let flips = 0;
+  let growing = 0;
+  let travelled = 0;
+  for (let i = 0; i < steps; i++) {
+    const next = descentStep(land, x, v, eta, momentum);
+    if (!Number.isFinite(next.x) || next.x < 0 || next.x > 1) return "explode";
+    const step = next.x - x;
+    if (prevStep && Math.sign(step) !== Math.sign(prevStep)) {
+      flips += 1;
+      if (Math.abs(step) > Math.abs(prevStep) * 1.05) growing += 1;
+    }
+    travelled += Math.abs(step);
+    prevStep = step;
+    ({ x, v } = next);
+  }
+  if (growing >= 2) return "overshoot";
+  if (flips >= 2) return "bouncy";
+  if (travelled < 0.01) return "crawl";
+  return "smooth";
 }
 
 // Drag distance → learning rate on a log scale, so small and large η both get room.
 function etaFromDrag(distance, span, etaMin, etaMax) {
   const t = Math.min(1, Math.max(0, distance / span));
   return etaMin * Math.pow(etaMax / etaMin, t);
+}
+
+function etaToFraction(eta, etaMin, etaMax) {
+  return Math.log(eta / etaMin) / Math.log(etaMax / etaMin);
 }
 
 function formatEta(eta) {

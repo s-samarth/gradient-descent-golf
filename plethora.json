@@ -3,13 +3,27 @@
   "runtime": "plethora-bit@2",
   "entry": "main.js",
   "title": "Gradient Descent Golf",
-  "description": "Nine holes of real gradient descent. Drag to pick a learning rate, release, and watch the ball step toward the global minimum. Too small crawls, too big explodes.",
-  "tags": ["game", "golf", "educational", "machine-learning", "math", "puzzle"],
-  "permissions": ["haptics", "backgroundMusic"],
+  "description": "Nine holes of real gradient descent. Drag to pick a learning rate and watch each hop land at η × slope. Read the meter, carry momentum through side valleys, and sink it at the global minimum.",
+  "tags": [
+    "game",
+    "golf",
+    "educational",
+    "machine-learning",
+    "math",
+    "puzzle"
+  ],
+  "permissions": [
+    "haptics",
+    "backgroundMusic"
+  ],
   "dependencies": [],
   "game": {
     "progress": {
-      "course": { "label": "Course progress", "stateSchemaVersion": 1, "ttlDays": 30 }
+      "course": {
+        "label": "Course progress",
+        "stateSchemaVersion": 1,
+        "ttlDays": 30
+      }
     }
   },
   "memory": {
@@ -19,8 +33,14 @@
         "valueType": "number",
         "order": "asc",
         "format": "integer",
-        "periods": ["weekly", "all_time"],
-        "scopes": ["following", "global"],
+        "periods": [
+          "weekly",
+          "all_time"
+        ],
+        "scopes": [
+          "following",
+          "global"
+        ],
         "dedupe": "best_per_user"
       }
     }
@@ -28,26 +48,110 @@
   "tuning": {
     "schemaVersion": 1,
     "groups": {
-      "gameplay": { "label": "Gameplay" },
-      "visual": { "label": "Visual feel" },
-      "audio": { "label": "Audio" }
+      "gameplay": {
+        "label": "Gameplay"
+      },
+      "visual": {
+        "label": "Visual feel"
+      },
+      "audio": {
+        "label": "Audio"
+      }
     },
     "knobs": {
-      "eta_min": { "label": "Smallest learning rate", "type": "number", "default": 0.0005, "min": 0.0001, "max": 0.01, "step": 0.0001, "group": "gameplay", "intent": "difficulty", "apply": "live" },
-      "eta_max": { "label": "Largest learning rate", "type": "number", "default": 0.6, "min": 0.1, "max": 2, "step": 0.05, "group": "gameplay", "intent": "difficulty", "apply": "live" },
-      "max_steps": { "label": "Descent steps per stroke", "type": "integer", "default": 30, "min": 8, "max": 80, "step": 1, "group": "gameplay", "intent": "difficulty", "apply": "live" },
-      "hop_ms": { "label": "Time per step", "type": "duration_ms", "default": 110, "min": 40, "max": 300, "step": 10, "group": "visual", "intent": "feel", "apply": "live" },
-      "accent_color": { "label": "Learning-rate accent", "type": "color", "default": "#ffd166", "group": "visual", "intent": "visual", "apply": "live" },
-      "music_volume": { "label": "Music volume", "type": "percent", "default": 0.3, "min": 0, "max": 1, "step": 0.05, "group": "audio", "intent": "audio", "apply": "live" }
+      "eta_min": {
+        "label": "Smallest learning rate",
+        "type": "number",
+        "default": 0.0005,
+        "min": 0.0001,
+        "max": 0.01,
+        "step": 0.0001,
+        "group": "gameplay",
+        "intent": "difficulty",
+        "apply": "live"
+      },
+      "eta_max": {
+        "label": "Largest learning rate",
+        "type": "number",
+        "default": 0.6,
+        "min": 0.1,
+        "max": 2,
+        "step": 0.05,
+        "group": "gameplay",
+        "intent": "difficulty",
+        "apply": "live"
+      },
+      "max_steps": {
+        "label": "Descent steps per stroke",
+        "type": "integer",
+        "default": 40,
+        "min": 8,
+        "max": 80,
+        "step": 1,
+        "group": "gameplay",
+        "intent": "difficulty",
+        "apply": "live"
+      },
+      "hop_ms": {
+        "label": "Time per step",
+        "type": "duration_ms",
+        "default": 110,
+        "min": 40,
+        "max": 300,
+        "step": 10,
+        "group": "visual",
+        "intent": "feel",
+        "apply": "live"
+      },
+      "accent_color": {
+        "label": "Learning-rate accent",
+        "type": "color",
+        "default": "#ffd166",
+        "group": "visual",
+        "intent": "visual",
+        "apply": "live"
+      },
+      "music_volume": {
+        "label": "Music volume",
+        "type": "percent",
+        "default": 0.3,
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "group": "audio",
+        "intent": "audio",
+        "apply": "live"
+      }
     }
   },
   "onboarding": {
     "kind": "guided",
-    "version": 1,
+    "version": 2,
     "steps": [
-      { "id": "aim", "title": "Drag to set η", "body": "Press anywhere and pull. Farther means a bigger learning rate. You don't aim: the gradient does.", "advance": "interaction" },
-      { "id": "update", "title": "θ ← θ − η·∇L", "body": "Each hop is one real gradient descent step toward lower loss.", "advance": "continue" },
-      { "id": "goal", "title": "Find the global minimum", "body": "Tiny η crawls and gets stuck in local dips. Big η escapes them but can explode. Sink it under par.", "advance": "continue" }
+      {
+        "id": "aim",
+        "title": "Drag to set η",
+        "body": "Press anywhere and pull. Farther means a bigger learning rate. You don't aim: the slope under the ball picks the direction.",
+        "advance": "interaction"
+      },
+      {
+        "id": "hop",
+        "title": "Each hop = η × slope",
+        "body": "Steep ground plus a big η means a huge hop. Overshoot the valley and you land on steeper ground, so the next hop is even bigger.",
+        "advance": "continue"
+      },
+      {
+        "id": "meter",
+        "title": "Read the meter",
+        "body": "Green heads smoothly downhill, yellow bounces, orange overshoots, red flies off. The ghost dots show your next hops.",
+        "advance": "continue"
+      },
+      {
+        "id": "momentum",
+        "title": "Momentum from hole 3",
+        "body": "The ball keeps some speed between hops, so it can roll through small side valleys. Sink it at the global minimum under par.",
+        "advance": "continue"
+      }
     ]
   }
 }
